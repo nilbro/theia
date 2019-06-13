@@ -22,6 +22,7 @@ import { ExtPluginApi } from './plugin-ext-api-contribution';
 import { IJSONSchema, IJSONSchemaSnippet } from '@theia/core/lib/common/json-schema';
 import { RecursivePartial } from '@theia/core/lib/common/types';
 import { PreferenceSchema, PreferenceSchemaProperties } from '@theia/core/lib/common/preferences/preference-schema';
+import { TaskDefinitionContribution, ProblemMatcherContribution, ProblemPatternContribution } from '@theia/task/lib/common';
 
 export const hostedServicePath = '/services/hostedPlugin';
 
@@ -71,6 +72,9 @@ export interface PluginPackageContribution {
     keybindings?: PluginPackageKeybinding[];
     debuggers?: PluginPackageDebuggersContribution[];
     snippets: PluginPackageSnippetsContribution[];
+    taskDefinitions?: TaskDefinitionContribution[];
+    problemMatchers?: ProblemMatcherContribution[];
+    problemPatterns?: ProblemPatternContribution[];
 }
 
 export interface PluginPackageViewContainer {
@@ -364,6 +368,9 @@ export interface PluginContribution {
     keybindings?: Keybinding[];
     debuggers?: DebuggerContribution[];
     snippets?: SnippetContribution[];
+    taskDefinitions?: TaskDefinitionContribution[];
+    problemMatchers?: ProblemMatcherContribution[];
+    problemPatterns?: ProblemPatternContribution[];
 }
 
 export interface SnippetContribution {

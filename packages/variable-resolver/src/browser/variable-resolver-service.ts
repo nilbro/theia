@@ -17,11 +17,12 @@
 // tslint:disable:no-any
 
 import { injectable, inject } from 'inversify';
-import { VariableRegistry } from './variable';
+import { Variable, VariableRegistry } from './variable';
 import URI from '@theia/core/lib/common/uri';
 
 export interface VariableResolveOptions {
     context?: URI;
+    overrides?: Variable[];
 }
 
 /**
@@ -116,6 +117,7 @@ export namespace VariableResolverService {
     export class Context {
 
         protected readonly resolved = new Map<string, string | undefined>();
+        protected readonly overridden = new Map<string, string | undefined>();
 
         constructor(
             protected readonly variableRegistry: VariableRegistry,
@@ -123,10 +125,17 @@ export namespace VariableResolverService {
         ) { }
 
         get(name: string): string | undefined {
-            return this.resolved.get(name);
+            return this.overridden.has(name) ? this.overridden.get(name) : this.resolved.get(name);
         }
 
         async resolve(name: string): Promise<void> {
+            const overriddenVar = this.getOverriddenVariable(name);
+            if (overriddenVar) {
+                const overriddenValue = await overriddenVar.resolve(this.options.context);
+                this.overridden.set(name, overriddenValue);
+                return;
+            }
+
             if (this.resolved.has(name)) {
                 return;
             }
@@ -137,6 +146,12 @@ export namespace VariableResolverService {
             } catch (e) {
                 console.error(`Failed to resolved '${name}' variable`, e);
                 this.resolved.set(name, undefined);
+            }
+        }
+
+        protected getOverriddenVariable(name: string): Variable | undefined {
+            if (this.options.overrides) {
+                return this.options.overrides.find(v => v.name === name);
             }
         }
 

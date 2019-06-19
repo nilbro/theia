@@ -222,10 +222,6 @@ export class QuickOpenTask implements QuickOpenModel, QuickOpenHandler {
 
         return { filteredRecentTasks, filteredConfiguredTasks, filteredDetectedTasks };
     }
-
-    private findConfig(label: string, configs: TaskConfiguration[]): TaskConfiguration | undefined {
-        return configs.find(task => label === task.label);
-    }
 }
 
 export class TaskRunQuickOpenItem extends QuickOpenGroupItem {

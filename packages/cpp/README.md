@@ -88,8 +88,9 @@ You can set the preference 'cpp.clangTidy' to enable the clang-tidy linter inclu
 - using the preferences:  'cpp.clangTidyChecks'
 - using the file '.clang-tidy' . The file is located in the same folder of the files or a parent folder.
 
-Note: using the preference checks will supersede the value found in the .clang-tidy file.
-
+```
+Note: When the "cpp.clangTidyChecks" is used in the preference settings, the configs will be merged with the configuration found in ".clang-tidy" file. If you want to drop the configs from ".clang-tidy", you'd need to disable it in "cpp.clangTidyChecks", which is "cpp.clangTidyChecks": "-*".
+```
 The syntax used to fill the checks can be found at http://clang.llvm.org/extra/clang-tidy/
 
 clang-tidy has its own checks and can also run Clang static analyzer checks. Each check has a name ([see link above for full list](http://clang.llvm.org/extra/clang-tidy/)). Clang-tidy takes as input the checks that should run, in the form of a comma-separated list of positive and negative (prefixed with -) globs. Positive globs add subsets of checks, negative globs remove them.
@@ -101,6 +102,38 @@ There are two ways to configure clang-tidy's checks: through a Theia preference 
 
     - for the .clang-tidy file: Checks: "-*,readability-*"
         - Meaning: disable all list-checks and enable all readability-* checks
+
+### Using clang-tidy as a task
+In .theia/tasks.json, add the following:
+```
+   {
+        "label": "[Task] clang-tidy",
+        "type": "shell",
+        "cwd": "${workspaceFolder}",
+        "command": "clang-tidy",
+        "args": [
+            "*"
+        ],
+        "options": {},
+        "problemMatcher": [
+            "$clangTidyMatcher"
+        ]
+   }
+```
+Definition of the fields:
+```
+    "label": <string>            // showed on task selection, after selecting "Run Task..."
+    "type": "shell",             // where the command will be executed, choice: "shell" or "process"
+    "cwd": "${workspaceFolder}", // root folder
+    "command": "clang-tidy",     // command execution, this program has to be installed on your computer
+    "args": [
+        "*"                      // which files will be looked at. Could also specified a single file
+    ],
+    "options": {},
+    "problemMatcher": [
+        "$clangTidyMatcher"      // to add the result to the Problems view
+    ]
+```
 
 ## License
 

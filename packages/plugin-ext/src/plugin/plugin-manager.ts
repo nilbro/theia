@@ -122,10 +122,12 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         // add foreign plugins
         for (const plugin of foreignPlugins) {
             this.registry.set(plugin.model.id, plugin);
+            this.fireOnDidChange();
         }
         // add own plugins, before initialization
         for (const plugin of plugins) {
             this.registry.set(plugin.model.id, plugin);
+            this.fireOnDidChange();
         }
 
         // run plugins
@@ -146,7 +148,6 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
             return this.host.loadTests();
         }
 
-        this.fireOnDidChange();
         return Promise.resolve();
     }
 

@@ -15,8 +15,7 @@
  ********************************************************************************/
 
 .theia-debug-container,
-.theia-session-container,
-.theia-debug-widget-container {
+.theia-session-container {
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -136,6 +135,7 @@
 
 .debug-toolbar .debug-configuration {
     width: 100%;
+    min-width: 40px;
 }
 
 .debug-toolbar .debug-action {

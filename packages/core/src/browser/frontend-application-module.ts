@@ -247,7 +247,9 @@ export const frontendApplicationModule = new ContainerModule((bind, unbind, isBo
         const services: ViewContainer.Services = {
             contextMenuRenderer: container.get(ContextMenuRenderer),
             commandRegistry: container.get(CommandRegistry),
-            menuRegistry: container.get(MenuModelRegistry)
+            menuRegistry: container.get(MenuModelRegistry),
+            widgetManager: container.get(WidgetManager),
+            splitPositionHandler: container.get(SplitPositionHandler)
         };
         const inputs: Array<{ widget: Widget, options?: ViewContainer.Factory.WidgetOptions }> = [];
         for (const descriptor of descriptors) {

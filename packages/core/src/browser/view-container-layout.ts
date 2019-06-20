@@ -14,19 +14,17 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import * as PQueue from 'p-queue';
 import { Drag } from '@phosphor/dragdrop';
 import { Message } from '@phosphor/messaging';
-import { IIterator, iter, toArray } from '@phosphor/algorithm';
+import { IIterator, toArray, map } from '@phosphor/algorithm';
 import { DisposableCollection } from '../common/disposable';
-import { ViewContainerPart } from './view-container';
 import { SplitLayout, Widget, LayoutItem, addEventListener, SplitPanel } from './widgets';
+import { SplitPositionHandler, SplitPositionOptions } from './shell/split-panels';
 
 export class ViewContainerLayout extends SplitLayout {
 
     protected readonly defaultHeights = new Map<Widget, number>();
     protected readonly beforeCollapseHeights = new Map<Widget, number>();
-    protected readonly animationQueue = new PQueue({ autoStart: true, concurrency: 1 });
     protected readonly toDisposeOnDetach = new DisposableCollection();
     protected readonly mouseDownListener = (event: MouseEvent) => {
         if (this.parent instanceof SplitPanel) {
@@ -134,13 +132,17 @@ export class ViewContainerLayout extends SplitLayout {
         }
     }
 
-    constructor(protected options: ViewContainerLayout.Options) {
+    constructor(protected options: ViewContainerLayout.Options, protected readonly splitPositionHandler: SplitPositionHandler) {
         super(options);
     }
 
+    protected get items(): ReadonlyArray<LayoutItem> {
+        // tslint:disable-next-line:no-any
+        return (this as any)._items as Array<LayoutItem>;
+    }
+
     iter(): IIterator<Widget> {
-        const widgets = this.items.map(item => item.widget);
-        return iter(widgets);
+        return map(this.items, item => item.widget);
     }
 
     get widgets(): ReadonlyArray<Widget> {
@@ -153,27 +155,19 @@ export class ViewContainerLayout extends SplitLayout {
         super.moveWidget(fromIndex, toIndex, undefined as any);
     }
 
-    protected get items(): ReadonlyArray<LayoutItem> {
-        // tslint:disable-next-line:no-any
-        return (this as any)._items as Array<LayoutItem>;
-    }
-
     protected isCollapsed(widget: Widget): boolean {
         if (this.options.isCollapsed) {
             return this.options.isCollapsed(widget);
-        }
-        if (widget instanceof ViewContainerPart) {
-            return widget.collapsed;
         }
         return false;
     }
 
     protected minHeight(widget: Widget): number {
         if (this.options.minHeight) {
-            return this.options.minHeight(widget);
-        }
-        if (widget instanceof ViewContainerPart) {
-            return widget.minHeight;
+            const minHeight = this.options.minHeight(widget);
+            if (minHeight !== undefined) {
+                return minHeight;
+            }
         }
         return 100;
     }
@@ -233,48 +227,13 @@ export class ViewContainerLayout extends SplitLayout {
         super.removeWidgetAt(index);
     }
 
-    dispose(): void {
-        if (!this.animationQueue.isPaused) {
-            this.animationQueue.pause();
-        }
-        this.animationQueue.clear();
-        super.dispose();
-    }
-
-    async animateHandle(index: number, position: number): Promise<void> {
-        this.animationQueue.add(() => new Promise<void>(animationResolve => {
-            const start = this.handlePosition(index);
-            const end = position;
-            const done = (f: number, t: number) => start < end ? f >= t : t >= f;
-            const step = () => start < end ? 40 : -40; // TODO: `Math.sign`
-            const moveHandle = (p: number) => new Promise<void>(resolve => {
-                if (start < end) {
-                    if (p > end) {
-                        this.moveHandle(index, end);
-                    } else {
-                        this.moveHandle(index, p);
-                    }
-                } else {
-                    if (p < end) {
-                        this.moveHandle(index, end);
-                    } else {
-                        this.moveHandle(index, p);
-                    }
-                }
-                resolve();
-            });
-            let currentPosition = start;
-            const next = () => {
-                if (!done(currentPosition, end)) {
-                    moveHandle(currentPosition += step()).then(() => {
-                        window.requestAnimationFrame(next);
-                    });
-                } else {
-                    animationResolve();
-                }
-            };
-            next();
-        }));
+    protected animateHandle(index: number, position: number): Promise<void> {
+        const options: SplitPositionOptions = {
+            duration: 150, // TODO customize
+            referenceWidget: this.widgets[index]
+        };
+        // tslint:disable-next-line:no-any
+        return this.splitPositionHandler.setSplitHandlePosition(this.parent as SplitPanel, index, position, options) as Promise<any>;
     }
 
     toggleCollapsed(index: number): void {
@@ -301,7 +260,6 @@ export class ViewContainerLayout extends SplitLayout {
         for (const { handleIndex, position } of animations) {
             this.animateHandle(handleIndex, position);
         }
-
     }
 
     private createAdjuster(): ViewContainerLayout.HandleAdjuster {
@@ -328,10 +286,15 @@ export namespace ViewContainerLayout {
 
     export interface Options extends SplitLayout.IOptions {
         isCollapsed?(widget: Widget): boolean;
-        minHeight?(widget: Widget): number;
+        minHeight?(widget: Widget): number | undefined;
     }
 
     export class HandleAdjuster {
+
+        /**
+         * Make sure to adjust the `line-height` of the `.theia-view-container .part .header` CSS class when modifying this, and vice versa.
+         */
+        static HEADER_HEIGHT = 22;
 
         constructor(
             readonly fullHeight: number,
@@ -452,7 +415,7 @@ export namespace ViewContainerLayout {
         }
 
         protected get headerHeight(): number {
-            return ViewContainerPart.HEADER_HEIGHT;
+            return HandleAdjuster.HEADER_HEIGHT;
         }
 
         protected get handleHeight(): number {

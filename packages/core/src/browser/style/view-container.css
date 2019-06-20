@@ -26,6 +26,7 @@
 }
 
 .theia-view-container .split-panel .p-SplitPanel-child {
+    min-width: 50px;
     min-height: 22px;
 }
 

@@ -16,17 +16,21 @@
 
 import { interfaces } from 'inversify';
 import { v4 } from 'uuid';
-import { Widget, EXPANSION_TOGGLE_CLASS, COLLAPSED_CLASS, MessageLoop, Message, SplitPanel, BaseWidget, addEventListener, SplitLayout } from './widgets';
+import { IIterator, map, toArray, find, some, every } from '@phosphor/algorithm';
+import {
+    Widget, EXPANSION_TOGGLE_CLASS, COLLAPSED_CLASS, MessageLoop, Message, SplitPanel, BaseWidget,
+    addEventListener, SplitLayout
+} from './widgets';
 import { Event, Emitter } from '../common/event';
 import { Disposable, DisposableCollection } from '../common/disposable';
-import { MaybePromise } from '../common/types';
 import { CommandRegistry } from '../common/command';
 import { MenuModelRegistry, MenuPath } from '../common/menu';
 import { ContextMenuRenderer, Anchor } from './context-menu-renderer';
-import { ApplicationShell } from './shell/application-shell';
+import { ApplicationShell, StatefulWidget, SplitPositionHandler } from './shell';
 import { ViewContainerLayout } from './view-container-layout';
+import { WidgetManager } from './widget-manager';
 
-export class ViewContainer extends BaseWidget implements ApplicationShell.TrackableWidgetProvider {
+export class ViewContainer extends BaseWidget implements StatefulWidget, ApplicationShell.TrackableWidgetProvider {
 
     protected readonly panel: SplitPanel;
 
@@ -34,7 +38,13 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
         super();
         this.id = `view-container-widget-${v4()}`;
         this.addClass('theia-view-container');
-        const layout = new ViewContainerLayout({ renderer: SplitPanel.defaultRenderer, spacing: 2, orientation: this.orientation });
+        const layout = new ViewContainerLayout({
+            renderer: SplitPanel.defaultRenderer,
+            spacing: 2,
+            orientation: this.orientation,
+            isCollapsed: (part: ViewContainerPart) => part.collapsed,
+            minHeight: (part: ViewContainerPart) => part.options.minHeight
+        }, services.splitPositionHandler);
         this.panel = new SplitPanel({ layout });
         this.panel.addClass('split-panel');
         for (const { widget, options } of inputs) {
@@ -49,14 +59,14 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
                 if (element instanceof Element) {
                     const closestPart = ViewContainerPart.closestPart(element);
                     if (closestPart && closestPart.id) {
-                        const toHide = this.parts.find(part => part.id === closestPart.id);
+                        const toHide = find(this.parts, part => part.id === closestPart.id);
                         if (toHide) {
                             this.toggleVisibility(toHide);
                         }
                     }
                 }
             },
-            isVisible: () => this.parts.some(part => !part.isHidden)
+            isVisible: () => some(this.parts, part => !part.isHidden)
         });
         menuRegistry.registerMenuAction([...this.contextMenuPath, '0_global'], {
             commandId: this.globalHideCommandId,
@@ -64,10 +74,10 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
         });
         this.toDispose.pushAll([
             addEventListener(this.node, 'contextmenu', event => {
-                if (event.button === 2 && this.parts.every(part => !!part.isHidden)) {
+                if (event.button === 2 && every(this.parts, part => !!part.isHidden)) {
                     event.stopPropagation();
                     event.preventDefault();
-                    contextMenuRenderer.render(this.contextMenuPath, event);
+                    contextMenuRenderer.render({ menuPath: this.contextMenuPath, anchor: event });
                 }
             }),
             Disposable.create(() => commandRegistry.unregisterCommand(this.globalHideCommandId)),
@@ -76,11 +86,12 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
     }
 
     addWidget(widget: Widget, options?: ViewContainer.Factory.WidgetOptions): Disposable {
-        const widgets = this.parts.map(part => part.wrapped);
-        if (widgets.indexOf(widget) !== -1) {
+        if (find(this.parts, ({ wrapped }) => wrapped.id === widget.id)) {
             return Disposable.NULL;
         }
-        const newPart = new ViewContainerPart(widget, this.id, { collapsed: false, minHeight: 100 }); // TODO: propagate the `options` to the parts.
+        const description = this.services.widgetManager.getDescription(widget);
+        const partId = description ? JSON.stringify(description) : widget.id;
+        const newPart = new ViewContainerPart(widget, partId, this.id, options);
         this.registerPart(newPart);
         this.layout.addWidget(newPart);
         this.update();
@@ -93,14 +104,14 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
                     event.preventDefault();
                     event.stopPropagation();
                     const { contextMenuRenderer } = this.services;
-                    contextMenuRenderer.render(this.contextMenuPath, event);
+                    contextMenuRenderer.render({ menuPath: this.contextMenuPath, anchor: event });
                 }
             })
         );
     }
 
     removeWidget(widget: Widget): boolean {
-        const part = this.parts.find(({ wrapped }) => wrapped.id === widget.id);
+        const part = find(this.parts, ({ wrapped }) => wrapped.id === widget.id);
         if (!part) {
             return false;
         }
@@ -110,12 +121,45 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
         return true;
     }
 
-    getTrackableWidgets(): MaybePromise<Widget[]> {
-        return this.parts;
+    getTrackableWidgets(): ViewContainerPart[] {
+        return toArray(this.parts);
     }
 
     get layout(): ViewContainerLayout {
         return this.panel.layout as ViewContainerLayout;
+    }
+
+    storeState(): ViewContainer.State {
+        const parts = toArray(map(this.parts, part => <ViewContainerPart.State>{
+            partId: part.partId,
+            hidden: part.isHidden
+        }));
+        return { parts };
+    }
+
+    restoreState(state: ViewContainer.State): void {
+        if (state.parts) {
+            // Reorder the parts according to the stored state
+            let index = 0;
+            for (const partState of state.parts) {
+                const currentIndex = this.getTrackableWidgets().findIndex(p => p.partId === partState.partId);
+                if (currentIndex >= 0) {
+                    if (currentIndex > index) {
+                        this.layout.moveWidget(currentIndex, index);
+                    }
+                    index++;
+                }
+            }
+
+            // Restore visibility state
+            const currentParts = this.getTrackableWidgets();
+            for (const partState of state.parts) {
+                const part = currentParts.find(p => p.partId === partState.partId);
+                if (part) {
+                    part.setHidden(partState.hidden);
+                }
+            }
+        }
     }
 
     protected registerPart(toRegister: ViewContainerPart): void {
@@ -123,13 +167,13 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
         const commandId = this.toggleVisibilityCommandId(toRegister);
         commandRegistry.registerCommand({ id: commandId }, {
             execute: () => {
-                const toHide = this.parts.find(part => part.id === toRegister.id);
+                const toHide = find(this.parts, part => part.id === toRegister.id);
                 if (toHide) {
                     this.toggleVisibility(toHide);
                 }
             },
             isToggled: () => {
-                const widgetToToggle = this.parts.find(part => part.id === toRegister.id);
+                const widgetToToggle = find(this.parts, part => part.id === toRegister.id);
                 if (widgetToToggle) {
                     return !widgetToToggle.isHidden;
                 }
@@ -155,30 +199,31 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
     }
 
     protected toggleCollapsed(part: ViewContainerPart): void {
-        const index = this.parts.indexOf(part);
-        if (index === -1) {
-            return;
+        const parts = this.getTrackableWidgets();
+        const index = parts.indexOf(part);
+        if (index >= 0) {
+            this.layout.toggleCollapsed(index);
         }
-        this.layout.toggleCollapsed(index);
     }
 
     protected moveBefore(toMovedId: string, moveBeforeThisId: string): void {
-        const toMoveIndex = this.parts.findIndex(part => part.id === toMovedId);
-        const moveBeforeThisIndex = this.parts.findIndex(part => part.id === moveBeforeThisId);
-        if (toMoveIndex !== -1 && moveBeforeThisIndex !== -1) {
+        const parts = this.getTrackableWidgets();
+        const toMoveIndex = parts.findIndex(part => part.id === toMovedId);
+        const moveBeforeThisIndex = parts.findIndex(part => part.id === moveBeforeThisId);
+        if (toMoveIndex >= 0 && moveBeforeThisIndex >= 0) {
             this.layout.moveWidget(toMoveIndex, moveBeforeThisIndex);
         }
     }
 
     protected onResize(msg: Widget.ResizeMessage): void {
-        for (const widget of [this.panel, ...this.parts]) {
+        for (const widget of [this.panel, ...this.getTrackableWidgets()]) {
             MessageLoop.sendMessage(widget, Widget.ResizeMessage.UnknownSize);
         }
         super.onResize(msg);
     }
 
     protected onUpdateRequest(msg: Message): void {
-        for (const widget of [this.panel, ...this.parts]) {
+        for (const widget of [this.panel, ...this.getTrackableWidgets()]) {
             widget.update();
         }
         super.onUpdateRequest(msg);
@@ -210,19 +255,8 @@ export class ViewContainer extends BaseWidget implements ApplicationShell.Tracka
      *
      * Returns with the parts, **not** the `wrapped`, original widgets.
      */
-    protected get parts(): ViewContainerPart[] {
-        const parts: ViewContainerPart[] = [];
-        const itr = this.layout.iter();
-        let next = itr.next();
-        while (next) {
-            if (next instanceof ViewContainerPart) {
-                parts.push(next);
-            } else {
-                throw new Error(`Expected an instance of ${ViewContainerPart.prototype}. Got ${JSON.stringify(next)} instead.`);
-            }
-            next = itr.next();
-        }
-        return parts;
+    protected get parts(): IIterator<ViewContainerPart> {
+        return this.layout.iter() as IIterator<ViewContainerPart>;
     }
 
     protected get contextMenuPath(): MenuPath {
@@ -245,6 +279,8 @@ export namespace ViewContainer {
         readonly contextMenuRenderer: ContextMenuRenderer;
         readonly commandRegistry: CommandRegistry;
         readonly menuRegistry: MenuModelRegistry;
+        readonly widgetManager: WidgetManager;
+        readonly splitPositionHandler: SplitPositionHandler;
     }
 
     export const Factory = Symbol('ViewContainerFactory');
@@ -252,33 +288,28 @@ export namespace ViewContainer {
         (...widgets: Factory.WidgetDescriptor[]): ViewContainer;
     }
 
+    export interface State {
+        parts: ViewContainerPart.State[]
+    }
+
     export namespace Factory {
 
         export interface WidgetOptions {
+            readonly order?: number; // TODO consider
 
-            /**
-             * https://code.visualstudio.com/docs/getstarted/keybindings#_when-clause-contexts
-             */
-            readonly when?: string;
+            readonly weight?: number; // TODO consider
 
-            readonly order?: number;
-
-            readonly weight?: number;
+            readonly minHeight?: number;
 
             readonly collapsed?: boolean;
 
-            readonly canToggleVisibility?: boolean;
+            readonly canToggleVisibility?: boolean; // TODO consider
 
             // Applies only to newly created views
-            readonly hideByDefault?: boolean;
-
-            readonly workspace?: boolean;
-
-            readonly focusCommand?: { id: string, keybindings?: string };
+            readonly hideByDefault?: boolean; // TODO consider
         }
 
         export interface WidgetDescriptor {
-
             // tslint:disable-next-line:no-any
             readonly widget: Widget | interfaces.ServiceIdentifier<Widget>;
 
@@ -290,12 +321,6 @@ export namespace ViewContainer {
 
 export class ViewContainerPart extends BaseWidget {
 
-    /**
-     * Make sure to adjust the `line-height` of the `.theia-view-container .part .header` CSS class when modifying this, and vice versa.
-     */
-    static HEADER_HEIGHT = 22;
-
-    readonly minHeight: number;
     protected readonly header: HTMLElement;
     protected readonly body: HTMLElement;
     protected readonly collapsedEmitter = new Emitter<boolean>();
@@ -312,14 +337,14 @@ export class ViewContainerPart extends BaseWidget {
 
     constructor(
         public readonly wrapped: Widget,
-        protected readonly viewContainerId: string,
-        { collapsed, minHeight }: { collapsed: boolean, minHeight: number } = { collapsed: false, minHeight: 100 }) {
+        public readonly partId: string,
+        viewContainerId: string,
+        public readonly options: ViewContainer.Factory.WidgetOptions = {}) {
 
         super();
-        this.id = `${this.viewContainerId}--${wrapped.id}`;
+        this.id = `${viewContainerId}--${wrapped.id}`;
         this.addClass('part');
-        this._collapsed = collapsed;
-        this.minHeight = minHeight;
+        this._collapsed = !!options.collapsed;
         const { header, body, disposable } = this.createContent();
         this.header = header;
         this.body = body;
@@ -336,8 +361,8 @@ export class ViewContainerPart extends BaseWidget {
             minScrollbarLength: 35 // TODO: Adjust this?
         };
         this.node.tabIndex = 0;
-        if (collapsed) {
-            this.collapsedEmitter.fire(collapsed);
+        if (this._collapsed) {
+            this.collapsedEmitter.fire(true);
         }
     }
 
@@ -489,7 +514,7 @@ export class ViewContainerPart extends BaseWidget {
         };
     }
 
-    onAfterAttach(msg: Message): void {
+    protected onAfterAttach(msg: Message): void {
         MessageLoop.sendMessage(this.wrapped, Widget.Msg.BeforeAttach);
         if (this.wrapped.isAttached) {
             Widget.detach(this.wrapped);
@@ -500,7 +525,7 @@ export class ViewContainerPart extends BaseWidget {
         super.onAfterAttach(msg);
     }
 
-    onUpdateRequest(msg: Message): void {
+    protected onUpdateRequest(msg: Message): void {
         if (this.wrapped.isAttached) {
             this.wrapped.update();
         }
@@ -510,6 +535,11 @@ export class ViewContainerPart extends BaseWidget {
 }
 
 export namespace ViewContainerPart {
+
+    export interface State {
+        partId: string
+        hidden: boolean
+    }
 
     export function closestPart(element: Element | EventTarget | null, selector: string = 'div.part'): Element | undefined {
         if (element instanceof Element) {

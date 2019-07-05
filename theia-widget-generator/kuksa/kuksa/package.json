@@ -10,7 +10,7 @@
   ],
   "dependencies": {
     "@theia/core": "latest",
-    "@theia/terminal": "latest"
+    "@theia/terminal": "^0.8.0"
   },
   "devDependencies": {
     "rimraf": "latest",

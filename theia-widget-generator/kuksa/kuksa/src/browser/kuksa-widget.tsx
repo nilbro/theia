@@ -3,21 +3,16 @@ import { injectable, postConstruct, inject } from 'inversify';
 import { AlertMessage } from '@theia/core/lib/browser/widgets/alert-message';
 import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { MessageService } from '@theia/core';
-import { TerminalWidget } from '@theia/terminal';
-//import { TerminalWidget } from '@theia/plugin';
-
+import '@theia/terminal';
 
 @injectable()
 export class KuksaWidget extends ReactWidget {
 
-    showMsg = () => 'Hello World';
     static readonly ID = 'kuksa:widget';
     static readonly LABEL = 'Kuksa Widget';
 
     @inject(MessageService)
     protected readonly messageService!: MessageService;
-
-    @inject(TerminalWidget)
 
     @postConstruct()
     protected async init(): Promise<void> {
@@ -29,10 +24,6 @@ export class KuksaWidget extends ReactWidget {
     }
 
     protected render(): React.ReactNode {
-
-
-    }
-    protected render(): React.ReactNode {
         const header = `This is a sample widget which simply calls the messageService
         in order to display an info message to end users.`;
         return <div id='widget-container'>
@@ -41,7 +32,6 @@ export class KuksaWidget extends ReactWidget {
             <button className='secondary' title='Display Message' onClick={_a => this.displayMessage()}>Display Message</button>
         </div>
     }
-
 
     protected displayMessage(): void {
         this.messageService.info('Congratulations: Kuksa Widget Successfully Created!');

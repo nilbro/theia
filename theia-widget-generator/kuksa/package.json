@@ -9,11 +9,6 @@
     "lerna": "2.4.0"
   },
   "workspaces": [
-    "kuksa",
-    "browser-app",
-    "electron-app"
-  ],
-  "dependencies": {
-    "@theia/terminal": "^0.8.0"
-  }
+    "kuksa", "browser-app", "electron-app"
+  ]
 }
